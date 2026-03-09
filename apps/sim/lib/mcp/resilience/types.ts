@@ -17,9 +17,7 @@ export interface McpExecutionContext {
 /**
  * Standardized function signature for invoking the NEXT component in the pipeline
  */
-export type McpMiddlewareNext = (
-  context: McpExecutionContext
-) => Promise<McpToolResult>
+export type McpMiddlewareNext = (context: McpExecutionContext) => Promise<McpToolResult>
 
 /**
  * Interface that all Resilience Middlewares must implement
@@ -30,8 +28,5 @@ export interface McpMiddleware {
    * @param context The current execution context
    * @param next The next middleware/tool in the chain
    */
-  execute(
-    context: McpExecutionContext,
-    next: McpMiddlewareNext
-  ): Promise<McpToolResult>
+  execute(context: McpExecutionContext, next: McpMiddlewareNext): Promise<McpToolResult>
 }

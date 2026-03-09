@@ -11,6 +11,10 @@ import { generateRequestId } from '@/lib/core/utils/request'
 import { McpClient } from '@/lib/mcp/client'
 import { mcpConnectionManager } from '@/lib/mcp/connection-manager'
 import { isMcpDomainAllowed, validateMcpDomain } from '@/lib/mcp/domain-check'
+import { CircuitBreakerMiddleware } from '@/lib/mcp/resilience/circuit-breaker'
+import { ResiliencePipeline } from '@/lib/mcp/resilience/pipeline'
+import { SchemaValidatorMiddleware } from '@/lib/mcp/resilience/schema-validator'
+import { TelemetryMiddleware } from '@/lib/mcp/resilience/telemetry'
 import { resolveMcpConfigEnvVars } from '@/lib/mcp/resolve-config'
 import {
   createMcpCacheAdapter,
@@ -27,10 +31,6 @@ import type {
   McpTransport,
 } from '@/lib/mcp/types'
 import { MCP_CONSTANTS } from '@/lib/mcp/utils'
-import { ResiliencePipeline } from '@/lib/mcp/resilience/pipeline'
-import { TelemetryMiddleware } from '@/lib/mcp/resilience/telemetry'
-import { CircuitBreakerMiddleware } from '@/lib/mcp/resilience/circuit-breaker'
-import { SchemaValidatorMiddleware } from '@/lib/mcp/resilience/schema-validator'
 
 const logger = createLogger('McpService')
 
