@@ -1,15 +1,3 @@
-# Goal Description
-Implement a "Day 2" reliability layer for the simstudioai/sim workflow engine by building a composable Resilience Interceptor/Middleware Pipeline for the MCP `executeTool` logic. This pipeline ensures enterprise-grade stability by introducing a Circuit Breaker State Machine, Zod-based Schema Enforcement for LLM outputs, and detailed Telemetry for latency and failure analysis, while addressing high-concurrency Node/TS environments.
-
-## User Review Required
-- Please confirm if `apps/sim/lib/mcp/service.ts` is the correct core injection point for wrapping `executeTool`.
-- Note on file path: `apps/sim/lib/workflow/executor.ts` was not found. Instead, `apps/sim/executor/execution/executor.ts` and `apps/sim/tools/workflow/executor.ts` were analyzed. Ensure intercepting `McpService`'s `executeTool` serves your architectural needs.
-- Please confirm the schema enforcement approach: we will compile and cache JSON Schemas to Zod validators upon MCP server discovery or lazily, instead of parsing dynamically per request.
-
-## Proposed Changes
-
-We will split the implementation into discrete PRs / Commits to maintain structure.
-
 ### Part 1: Telemetry Hooks
 Implement the foundation for tracking.
 *(Change Rationale: Transitioning to a middleware pattern instead of a monolithic proxy, allowing telemetry to be composed easily).*
