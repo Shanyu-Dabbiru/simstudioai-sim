@@ -1,4 +1,3 @@
-/// <reference types="bun-types" />
 import { test, expect, describe, mock } from 'bun:test'
 import { ResiliencePipeline } from './pipeline'
 import type { McpExecutionContext, McpMiddleware, McpMiddlewareNext } from './types'
@@ -85,12 +84,12 @@ describe('TelemetryMiddleware', () => {
         await telemetry.execute(mockContext, finalHandler)
 
         expect(infoInfo).toHaveBeenCalled()
-        const logMsg = infoInfo.mock.calls[0][0]
-        const logCtx = infoInfo.mock.calls[0][1]
-        expect(logMsg).toBe('MCP Tool Execution Completed')
-        expect(logCtx.toolName).toBe('telemetry_tool')
-        expect(logCtx.latency_ms).toBeGreaterThanOrEqual(10)
-        expect(logCtx.success).toBe(true)
+        const msg = infoInfo.mock.calls[0][0]
+        const logCall = infoInfo.mock.calls[0][1]
+        expect(msg).toBe('MCP Tool Execution Completed')
+        expect(logCall.toolName).toBe('telemetry_tool')
+        expect(logCall.latency_ms).toBeGreaterThanOrEqual(10)
+        expect(logCall.success).toBe(true)
     })
 
     test('should log TOOL_ERROR when tool result has isError: true', async () => {
@@ -105,9 +104,11 @@ describe('TelemetryMiddleware', () => {
         await telemetry.execute(mockContext, finalHandler)
 
         expect(infoInfo).toHaveBeenCalled()
-        const logCtx = infoInfo.mock.calls[0][1]
-        expect(logCtx.success).toBe(false)
-        expect(logCtx.failure_reason).toBe('TOOL_ERROR')
+        const msg = infoInfo.mock.calls[0][0]
+        const logCall = infoInfo.mock.calls[0][1]
+        expect(msg).toBe('MCP Tool Execution Completed')
+        expect(logCall.success).toBe(false)
+        expect(logCall.failure_reason).toBe('TOOL_ERROR')
     })
 
     test('should log exception and rethrow with TIMEOUT explanation', async () => {
@@ -128,9 +129,9 @@ describe('TelemetryMiddleware', () => {
 
         expect(caughtError).toBeDefined()
         expect(errorError).toHaveBeenCalled()
-        const logMsg = errorError.mock.calls[0][0]
-        const logCtx = errorError.mock.calls[0][1]
-        expect(logMsg).toBe('MCP Tool Execution Failed')
-        expect(logCtx.failure_reason).toBe('TIMEOUT')
+        const msg = errorError.mock.calls[0][0]
+        const logCall = errorError.mock.calls[0][1]
+        expect(msg).toBe('MCP Tool Execution Failed')
+        expect(logCall.failure_reason).toBe('TIMEOUT')
     })
 })
