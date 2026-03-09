@@ -135,3 +135,182 @@ describe('TelemetryMiddleware', () => {
         expect(logCall.failure_reason).toBe('TIMEOUT')
     })
 })
+
+const { CircuitBreakerMiddleware } = await import('./circuit-breaker')
+
+describe('CircuitBreakerMiddleware', () => {
+    const mockContext: McpExecutionContext = {
+        toolCall: { name: 'cb_tool', arguments: {} },
+        serverId: 'cb-server-1',
+        userId: 'user-1',
+        workspaceId: 'workspace-1'
+    }
+
+    test('should trip to OPEN after threshold failures', async () => {
+        const cb = new CircuitBreakerMiddleware({ failureThreshold: 2, resetTimeoutMs: 1000 })
+        const errorMsg = 'Tool Failed'
+        const failingHandler: McpMiddlewareNext = async () => { throw new Error(errorMsg) }
+
+        // 1st failure (CLOSED -> CLOSED)
+        await expect(cb.execute(mockContext, failingHandler)).rejects.toThrow(errorMsg)
+
+        // 2nd failure (CLOSED -> OPEN)
+        await expect(cb.execute(mockContext, failingHandler)).rejects.toThrow(errorMsg)
+
+        // 3rd attempt (OPEN -> Fail Fast)
+        await expect(cb.execute(mockContext, failingHandler)).rejects.toThrow(
+            'Circuit breaker is OPEN for server cb-server-1. Fast-failing request to cb_tool.'
+        )
+    })
+
+    test('should transition CLOSED -> OPEN -> HALF-OPEN lock correctly', async () => {
+        const resetTimeoutMs = 50
+        const cb = new CircuitBreakerMiddleware({ failureThreshold: 1, resetTimeoutMs })
+        const failingHandler: McpMiddlewareNext = async () => { throw new Error('Fail') }
+
+        // Trip to OPEN
+        await expect(cb.execute(mockContext, failingHandler)).rejects.toThrow('Fail')
+        await expect(cb.execute(mockContext, failingHandler)).rejects.toThrow('OPEN')
+
+        // Wait for timeout to enter HALF-OPEN
+        await new Promise(r => setTimeout(r, resetTimeoutMs + 10))
+
+        // Create a Slow Probe Handler to mimic latency and hold the lock
+        let probeInProgress = false
+        const slowProbeHandler: McpMiddlewareNext = async () => {
+            probeInProgress = true
+            await new Promise(r => setTimeout(r, 100))
+            return { content: [{ type: 'text', text: 'Probe Success' }] }
+        }
+
+        // Send a batch of 3 concurrent requests while the reset timeout has passed
+        // The first should acquire HALF-OPEN, the rest should fail fast.
+        const promises = [
+            cb.execute(mockContext, slowProbeHandler),
+            cb.execute(mockContext, async () => { return { content: [] } }),
+            cb.execute(mockContext, async () => { return { content: [] } })
+        ]
+
+        const results = await Promise.allSettled(promises)
+
+        // Exactly one should succeed (the slow probe)
+        const fulfilled = results.filter(r => r.status === 'fulfilled')
+        expect(fulfilled.length).toBe(1)
+        expect((fulfilled[0] as PromiseFulfilledResult<any>).value.content[0].text).toBe('Probe Success')
+
+        // Exactly two should fail-fast due to HALF-OPEN lock
+        const rejected = results.filter(r => r.status === 'rejected')
+        expect(rejected.length).toBe(2)
+        expect((rejected[0] as PromiseRejectedResult).reason.message).toContain('Circuit breaker is HALF-OPEN')
+
+        expect(probeInProgress).toBe(true)
+
+        // Subsequent requests should now succeed (CLOSED again)
+        const newResult = await cb.execute(mockContext, async () => { return { content: [{ type: 'text', text: 'Normal' }] } })
+        expect(newResult.content?.[0].text).toBe('Normal')
+    })
+})
+
+const { SchemaValidatorMiddleware } = await import('./schema-validator')
+
+describe('SchemaValidatorMiddleware', () => {
+    const mockSchemaTool: any = {
+        name: 'test_schema_tool',
+        serverId: 's1',
+        serverName: 's1',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                requiredStr: { type: 'string' },
+                optionalNum: { type: 'number' },
+                enumVal: { type: 'string', enum: ['A', 'B'] }
+            },
+            required: ['requiredStr']
+        }
+    }
+
+    test('should compile, cache, and successfully validate valid args', async () => {
+        let providerCalled = 0
+        const toolProvider = async (name: string) => {
+            providerCalled++
+            return name === 'test_schema_tool' ? mockSchemaTool : undefined
+        }
+
+        const validator = new SchemaValidatorMiddleware({ toolProvider })
+
+        const mockContext: any = {
+            toolCall: {
+                name: 'test_schema_tool',
+                arguments: {
+                    requiredStr: 'hello',
+                    enumVal: 'A'
+                }
+            },
+            serverId: 'server-1',
+            userId: 'user-1',
+            workspaceId: 'workspace-1'
+        }
+
+        let nextCalled = false
+        const nextHandler: any = async (ctx: any) => {
+            nextCalled = true
+            expect(ctx.toolCall.arguments).toEqual({
+                requiredStr: 'hello',
+                enumVal: 'A'
+            })
+            return { content: [{ type: 'text', text: 'ok' }] }
+        }
+
+        const result1 = await validator.execute({
+            ...mockContext,
+            toolCall: { name: 'test_schema_tool', arguments: { requiredStr: 'hello', enumVal: 'A' } }
+        }, nextHandler)
+        expect(result1.content?.[0].text).toBe('ok')
+        expect(nextCalled).toBe(true)
+        expect(providerCalled).toBe(1)
+
+        // Second call should hit the cache
+        nextCalled = false
+        const result2 = await validator.execute({
+            ...mockContext,
+            toolCall: { name: 'test_schema_tool', arguments: { requiredStr: 'hello', enumVal: 'A' } }
+        }, nextHandler)
+        expect(result2.content?.[0].text).toBe('ok')
+        expect(nextCalled).toBe(true)
+        expect(providerCalled).toBe(1) // from cache
+    })
+
+    test('should intercept validation failure and return gracefully formatted error', async () => {
+        const validator = new SchemaValidatorMiddleware()
+        validator.cacheTool(mockSchemaTool)
+
+        const mockContext: any = {
+            toolCall: {
+                name: 'test_schema_tool',
+                arguments: {
+                    // missing requiredStr
+                    enumVal: 'C' // invalid enum
+                }
+            },
+            serverId: 'server-1',
+            userId: 'user-1',
+            workspaceId: 'workspace-1'
+        }
+
+        let nextCalled = false
+        const nextHandler: any = async () => {
+            nextCalled = true
+            return { content: [] }
+        }
+
+        const result = await validator.execute(mockContext, nextHandler)
+        expect(nextCalled).toBe(false)
+        expect(result.isError).toBe(true)
+        expect(result.content?.[0].type).toBe('text')
+
+        const errorText = result.content?.[0].text as string
+        expect(errorText).toContain('Schema validation failed')
+        expect(errorText).toContain('requiredStr')
+        expect(errorText).toContain('enumVal')
+    })
+})
